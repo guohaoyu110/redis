@@ -1,18 +1,21 @@
 name: Daily
 
 on:
-  release:
-    types: [created]
+  pull_request:
+    branches:
+      # any PR to a release branch.
+      - '[0-9].[0-9]'
   schedule:
     - cron: '0 0 * * *'
 
 jobs:
 
-  test-jemalloc:
+  test-ubuntu-jemalloc:
     runs-on: ubuntu-latest
+    if: github.repository == 'redis/redis'
     timeout-minutes: 14400
     steps:
-    - uses: actions/checkout@v1
+    - uses: actions/checkout@v2
     - name: make
       run: make
     - name: test
@@ -26,11 +29,12 @@ jobs:
     - name: cluster tests
       run: ./runtest-cluster
 
-  test-libc-malloc:
+  test-ubuntu-libc-malloc:
     runs-on: ubuntu-latest
+    if: github.repository == 'redis/redis'
     timeout-minutes: 14400
     steps:
-    - uses: actions/checkout@v1
+    - uses: actions/checkout@v2
     - name: make
       run: make MALLOC=libc
     - name: test
@@ -44,11 +48,12 @@ jobs:
     - name: cluster tests
       run: ./runtest-cluster
 
-  test-32bit:
+  test-ubuntu-32bit:
     runs-on: ubuntu-latest
+    if: github.repository == 'redis/redis'
     timeout-minutes: 14400
     steps:
-    - uses: actions/checkout@v1
+    - uses: actions/checkout@v2
     - name: make
       run: |
         sudo apt-get update && sudo apt-get install libc6-dev-i386
@@ -66,11 +71,12 @@ jobs:
     - name: cluster tests
       run: ./runtest-cluster
 
-  test-tls:
+  test-ubuntu-tls:
     runs-on: ubuntu-latest
+    if: github.repository == 'redis/redis'
     timeout-minutes: 14400
     steps:
-    - uses: actions/checkout@v1
+    - uses: actions/checkout@v2
     - name: make
       run: |
         make BUILD_TLS=yes
@@ -79,18 +85,26 @@ jobs:
         sudo apt-get install tcl8.5 tcl-tls
         ./utils/gen-test-certs.sh
         ./runtest --accurate --verbose --tls
+        ./runtest --accurate --verbose
     - name: module api test
-      run: ./runtest-moduleapi --verbose --tls
+      run: |
+        ./runtest-moduleapi --verbose --tls
+        ./runtest-moduleapi --verbose
     - name: sentinel tests
-      run: ./runtest-sentinel
+      run: |
+        ./runtest-sentinel --tls
+        ./runtest-sentinel
     - name: cluster tests
-      run: ./runtest-cluster
+      run: |
+        ./runtest-cluster --tls
+        ./runtest-cluster
 
   test-valgrind:
     runs-on: ubuntu-latest
+    if: github.repository == 'redis/redis'
     timeout-minutes: 14400
     steps:
-    - uses: actions/checkout@v1
+    - uses: actions/checkout@v2
     - name: make
       run: make valgrind
     - name: test
@@ -99,3 +113,58 @@ jobs:
         ./runtest --valgrind --verbose --clients 1
     - name: module api test
       run: ./runtest-moduleapi --valgrind --verbose --clients 1
+
+  test-centos7-jemalloc:
+    runs-on: ubuntu-latest
+    if: github.repository == 'redis/redis'
+    container: centos:7
+    timeout-minutes: 14400
+    steps:
+    - uses: actions/checkout@v2
+    - name: make
+      run: |
+        yum -y install centos-release-scl
+        yum -y install devtoolset-7
+        scl enable devtoolset-7 "make"
+    - name: test
+      run: |
+        yum -y install tcl
+        ./runtest --accurate --verbose
+    - name: module api test
+      run: ./runtest-moduleapi --verbose
+    - name: sentinel tests
+      run: ./runtest-sentinel
+    - name: cluster tests
+      run: ./runtest-cluster
+
+  test-centos7-tls:
+    runs-on: ubuntu-latest
+    if: github.repository == 'redis/redis'
+    container: centos:7
+    timeout-minutes: 14400
+    steps:
+    - uses: actions/checkout@v2
+    - name: make
+      run: |
+        yum -y install centos-release-scl epel-release
+        yum -y install devtoolset-7 openssl-devel openssl
+        scl enable devtoolset-7 "make BUILD_TLS=yes"
+    - name: test
+      run: |
+        yum -y install tcl tcltls
+        ./utils/gen-test-certs.sh
+        ./runtest --accurate --verbose --tls
+        ./runtest --accurate --verbose
+    - name: module api test
+      run: |
+        ./runtest-moduleapi --verbose --tls
+        ./runtest-moduleapi --verbose
+    - name: sentinel tests
+      run: |
+        ./runtest-sentinel --tls
+        ./runtest-sentinel
+    - name: cluster tests
+      run: |
+        ./runtest-cluster --tls
+        ./runtest-cluster
+

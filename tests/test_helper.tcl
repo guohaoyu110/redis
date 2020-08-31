@@ -68,6 +68,7 @@ set ::all_tests {
     unit/pendingquerybuf
     unit/tls
     unit/tracking
+    unit/oom-score-adj
 }
 # Index to the next test to run in the ::all_tests list.
 set ::next_test 0
@@ -359,8 +360,8 @@ proc read_from_test_client fd {
         puts $err
         lappend ::failed_tests $err
         set ::active_clients_task($fd) "(ERR) $data"
-            if {$::stop_on_failure} {
-            puts -nonewline "(Test stopped, press enter to continue)"
+        if {$::stop_on_failure} {
+            puts -nonewline "(Test stopped, press enter to resume the tests)"
             flush stdout
             gets stdin
         }
