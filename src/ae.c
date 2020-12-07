@@ -352,7 +352,7 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
     /* Nothing to do? return ASAP */
     if (!(flags & AE_TIME_EVENTS) && !(flags & AE_FILE_EVENTS)) return 0;
 
-    /* Note that we want call select() even if there are no
+    /* Note that we want to call select() even if there are no
      * file events to process as long as we want to process time
      * events, in order to sleep until the next time event is ready
      * to fire. */
@@ -405,7 +405,7 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
             int fired = 0; /* Number of events fired for current fd. */
 
             /* Normally we execute the readable event first, and the writable
-             * event laster. This is useful as sometimes we may be able
+             * event later. This is useful as sometimes we may be able
              * to serve the reply of a query immediately after processing the
              * query.
              *
@@ -413,7 +413,7 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
              * asking us to do the reverse: never fire the writable event
              * after the readable. In such a case, we invert the calls.
              * This is useful when, for instance, we want to do things
-             * in the beforeSleep() hook, like fsynching a file to disk,
+             * in the beforeSleep() hook, like fsyncing a file to disk,
              * before replying to a client. */
             int invert = fe->mask & AE_BARRIER;
 
