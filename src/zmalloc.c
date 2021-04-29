@@ -31,6 +31,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <unistd.h>
+#include <assert.h>
 
 /* This function provide us access to the original libc free(). This is useful
  * for instance to free results obtained by backtrace_symbols(). We need
@@ -48,13 +50,20 @@ void zlibc_free(void *ptr) {
 
 #ifdef HAVE_MALLOC_SIZE
 #define PREFIX_SIZE (0)
+#define ASSERT_NO_SIZE_OVERFLOW(sz)
 #else
 #if defined(__sun) || defined(__sparc) || defined(__sparc__)
 #define PREFIX_SIZE (sizeof(long long))
 #else
 #define PREFIX_SIZE (sizeof(size_t))
 #endif
+#define ASSERT_NO_SIZE_OVERFLOW(sz) assert((sz) + PREFIX_SIZE > (sz))
 #endif
+
+/* When using the libc allocator, use a minimum allocation size to match the
+ * jemalloc behavior that doesn't return NULL in this case.
+ */
+#define MALLOC_MIN_SIZE(x) ((x) > 0 ? (x) : sizeof(long))
 
 /* Explicitly override malloc/free etc when using tcmalloc. */
 #if defined(USE_TCMALLOC)
@@ -88,7 +97,8 @@ static void (*zmalloc_oom_handler)(size_t) = zmalloc_default_oom;
 /* Try allocating memory, and return NULL if failed.
  * '*usable' is set to the usable size if non NULL. */
 void *ztrymalloc_usable(size_t size, size_t *usable) {
-    void *ptr = malloc(size+PREFIX_SIZE);
+    ASSERT_NO_SIZE_OVERFLOW(size);
+    void *ptr = malloc(MALLOC_MIN_SIZE(size)+PREFIX_SIZE);
 
     if (!ptr) return NULL;
 #ifdef HAVE_MALLOC_SIZE
@@ -130,6 +140,7 @@ void *zmalloc_usable(size_t size, size_t *usable) {
  * Currently implemented only for jemalloc. Used for online defragmentation. */
 #ifdef HAVE_DEFRAG
 void *zmalloc_no_tcache(size_t size) {
+    ASSERT_NO_SIZE_OVERFLOW(size);
     void *ptr = mallocx(size+PREFIX_SIZE, MALLOCX_TCACHE_NONE);
     if (!ptr) zmalloc_oom_handler(size);
     update_zmalloc_stat_alloc(zmalloc_size(ptr));
@@ -146,7 +157,8 @@ void zfree_no_tcache(void *ptr) {
 /* Try allocating memory and zero it, and return NULL if failed.
  * '*usable' is set to the usable size if non NULL. */
 void *ztrycalloc_usable(size_t size, size_t *usable) {
-    void *ptr = calloc(1, size+PREFIX_SIZE);
+    ASSERT_NO_SIZE_OVERFLOW(size);
+    void *ptr = calloc(1, MALLOC_MIN_SIZE(size)+PREFIX_SIZE);
     if (ptr == NULL) return NULL;
 
 #ifdef HAVE_MALLOC_SIZE
@@ -186,6 +198,7 @@ void *zcalloc_usable(size_t size, size_t *usable) {
 /* Try reallocating memory, and return NULL if failed.
  * '*usable' is set to the usable size if non NULL. */
 void *ztryrealloc_usable(void *ptr, size_t size, size_t *usable) {
+    ASSERT_NO_SIZE_OVERFLOW(size);
 #ifndef HAVE_MALLOC_SIZE
     void *realptr;
 #endif
@@ -333,7 +346,6 @@ void zmalloc_set_oom_handler(void (*oom_handler)(size_t)) {
  * version of the function. */
 
 #if defined(HAVE_PROC_STAT)
-#include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -346,7 +358,7 @@ size_t zmalloc_get_rss(void) {
     int fd, count;
     char *p, *x;
 
-    snprintf(filename,256,"/proc/%d/stat",getpid());
+    snprintf(filename,256,"/proc/%ld/stat",(long) getpid());
     if ((fd = open(filename,O_RDONLY)) == -1) return 0;
     if (read(fd,buf,4096) <= 0) {
         close(fd);
@@ -370,9 +382,6 @@ size_t zmalloc_get_rss(void) {
     return rss;
 }
 #elif defined(HAVE_TASKINFO)
-#include <unistd.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include <sys/types.h>
 #include <sys/sysctl.h>
 #include <mach/task.h>
@@ -393,7 +402,6 @@ size_t zmalloc_get_rss(void) {
 #include <sys/types.h>
 #include <sys/sysctl.h>
 #include <sys/user.h>
-#include <unistd.h>
 
 size_t zmalloc_get_rss(void) {
     struct kinfo_proc info;
@@ -406,9 +414,9 @@ size_t zmalloc_get_rss(void) {
 
     if (sysctl(mib, 4, &info, &infolen, NULL, 0) == 0)
 #if defined(__FreeBSD__)
-        return (size_t)info.ki_rssize;
+        return (size_t)info.ki_rssize * getpagesize();
 #else
-        return (size_t)info.kp_vm_rssize;
+        return (size_t)info.kp_vm_rssize * getpagesize();
 #endif
 
     return 0L;
@@ -416,7 +424,6 @@ size_t zmalloc_get_rss(void) {
 #elif defined(__NetBSD__)
 #include <sys/types.h>
 #include <sys/sysctl.h>
-#include <unistd.h>
 
 size_t zmalloc_get_rss(void) {
     struct kinfo_proc2 info;
@@ -429,7 +436,7 @@ size_t zmalloc_get_rss(void) {
     mib[4] = sizeof(info);
     mib[5] = 1;
     if (sysctl(mib, 4, &info, &infolen, NULL, 0) == 0)
-        return (size_t)info.p_vm_rssize;
+        return (size_t)info.p_vm_rssize * getpagesize();
 
     return 0L;
 }
@@ -443,7 +450,7 @@ size_t zmalloc_get_rss(void) {
     char filename[256];
     int fd;
 
-    snprintf(filename,256,"/proc/%d/psinfo",getpid());
+    snprintf(filename,256,"/proc/%ld/psinfo",(long) getpid());
 
     if ((fd = open(filename,O_RDONLY)) == -1) return 0;
     if (ioctl(fd, PIOCPSINFO, &info) == -1) {
@@ -585,15 +592,18 @@ size_t zmalloc_get_smap_bytes_by_field(char *field, long pid) {
 size_t zmalloc_get_smap_bytes_by_field(char *field, long pid) {
 #if defined(__APPLE__)
     struct proc_regioninfo pri;
-    if (proc_pidinfo(pid, PROC_PIDREGIONINFO, 0, &pri, PROC_PIDREGIONINFO_SIZE) ==
-	PROC_PIDREGIONINFO_SIZE) {
-	if (!strcmp(field, "Private_Dirty:")) {
-            return (size_t)pri.pri_pages_dirtied * 4096;
-	} else if (!strcmp(field, "Rss:")) {
-            return (size_t)pri.pri_pages_resident * 4096;
-	} else if (!strcmp(field, "AnonHugePages:")) {
+    if (pid == -1) pid = getpid();
+    if (proc_pidinfo(pid, PROC_PIDREGIONINFO, 0, &pri,
+                     PROC_PIDREGIONINFO_SIZE) == PROC_PIDREGIONINFO_SIZE)
+    {
+        int pagesize = getpagesize();
+        if (!strcmp(field, "Private_Dirty:")) {
+            return (size_t)pri.pri_pages_dirtied * pagesize;
+        } else if (!strcmp(field, "Rss:")) {
+            return (size_t)pri.pri_pages_resident * pagesize;
+        } else if (!strcmp(field, "AnonHugePages:")) {
             return 0;
-	}
+        }
     }
     return 0;
 #endif
@@ -603,6 +613,11 @@ size_t zmalloc_get_smap_bytes_by_field(char *field, long pid) {
 }
 #endif
 
+/* Return the total number bytes in pages marked as Private Dirty.
+ *
+ * Note: depending on the platform and memory footprint of the process, this
+ * call can be slow, exceeding 1000ms!
+ */
 size_t zmalloc_get_private_dirty(long pid) {
     return zmalloc_get_smap_bytes_by_field("Private_Dirty:",pid);
 }
@@ -665,11 +680,13 @@ size_t zmalloc_get_memory_size(void) {
 
 #ifdef REDIS_TEST
 #define UNUSED(x) ((void)(x))
-int zmalloc_test(int argc, char **argv) {
+int zmalloc_test(int argc, char **argv, int accurate) {
     void *ptr;
 
     UNUSED(argc);
     UNUSED(argv);
+    UNUSED(accurate);
+    printf("Malloc prefix size: %d\n", (int) PREFIX_SIZE);
     printf("Initial used memory: %zu\n", zmalloc_used_memory());
     ptr = zmalloc(123);
     printf("Allocated 123 bytes; used: %zu\n", zmalloc_used_memory());
